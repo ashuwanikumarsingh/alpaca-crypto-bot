@@ -3,6 +3,4 @@ yfinance
 scikit-learn
 pandas
 numpy
-flask
-gunicorn
 gradio

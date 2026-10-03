@@ -4,7 +4,6 @@ import threading
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from flask import Flask
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score
 import gradio as gr
@@ -12,8 +11,6 @@ import gradio as gr
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, OrderType, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
-
-app = Flask(__name__)
 
 API_KEY = os.environ.get("APACA_API_KEY", "PKHT7JZKIQYQARUAQC3VHEK3VW")
 SECRET_KEY = os.environ.get("APACA_SECRET_KEY", "EHbhfoetyHhjPdv5jb5tdJ1WjgaUsVSQmjuS9VJ9cdKn")
@@ -28,7 +25,6 @@ TAKE_PROFIT_PCT = 0.03
 
 trading_client = TradingClient(API_KEY, SECRET_KEY, paper=True)
 
-# Shared state dictionary for live dashboard updates
 bot_state = {
     "last_cycle": "Initializing...",
     "price": "Loading...",
@@ -110,11 +106,10 @@ def run_trading_bot():
 
         time.sleep(CHECK_INTERVAL_SECONDS)
 
-# Launch background bot thread
+# Start 24/7 background worker thread
 t = threading.Thread(target=run_trading_bot, daemon=True)
 t.start()
 
-# --- GRADIO DASHBOARD INTERFACE ---
 def get_live_metrics():
     try:
         account = trading_client.get_account()
@@ -153,7 +148,7 @@ def manual_buy():
                 time_in_force=TimeInForce.GTC
             )
         )
-        return "Manual BUY executed!"
+        return "Manual BUY placed!"
     except Exception as e:
         return f"Buy failed: {e}"
 
@@ -161,7 +156,7 @@ def manual_close():
     try:
         trading_client.close_position(SYMBOL_alpaca)
         bot_state["entry_price"] = None
-        return "Position closed."
+        return "Position flattened."
     except Exception as e:
         return f"Close failed: {e}"
 
@@ -183,24 +178,29 @@ with gr.Blocks(title="Alpaca Crypto Terminal") as demo:
         heartbeat_box = gr.Textbox(label="Last Strategy Cycle", interactive=False)
 
     with gr.Row():
+        refresh_btn = gr.Button("🔄 Refresh Live Stats", variant="secondary")
         buy_btn = gr.Button("🟢 Instant BUY", variant="primary")
         close_btn = gr.Button("🔴 Flatten Position", variant="stop")
     
     action_feedback = gr.Textbox(label="Execution Status", interactive=False)
 
+    outputs = [cash_box, equity_box, pos_box, price_box, rsi_box, signal_box, winrate_box, heartbeat_box]
+
+    # Manual buttons
+    refresh_btn.click(fn=get_live_metrics, outputs=outputs)
     buy_btn.click(fn=manual_buy, outputs=[action_feedback])
     close_btn.click(fn=manual_close, outputs=[action_feedback])
 
-    # Poll live metrics every 5 seconds
-    demo.load(
-        fn=get_live_metrics,
-        outputs=[cash_box, equity_box, pos_box, price_box, rsi_box, signal_box, winrate_box, heartbeat_box],
-        every=5
-    )
+    # Initial load
+    demo.load(fn=get_live_metrics, outputs=outputs)
 
-# Mount Gradio UI directly onto the root path of the Flask server
-app = gr.mount_gradio_app(app, demo, path="/")
+    # Compatible auto-refresh timer (modern Gradio syntax)
+    try:
+        timer = gr.Timer(5)
+        timer.tick(fn=get_live_metrics, outputs=outputs)
+    except Exception:
+        pass
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    demo.launch(server_name="0.0.0.0", server_port=port)
